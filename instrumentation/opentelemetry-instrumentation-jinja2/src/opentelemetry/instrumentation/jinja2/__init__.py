@@ -42,7 +42,7 @@ from wrapt import wrap_function_wrapper as _wrap
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.jinja2.package import _instruments
 from opentelemetry.instrumentation.jinja2.version import __version__
-from opentelemetry.instrumentation.utils import unwrap
+from opentelemetry.instrumentation.utils import is_instrumentation_enabled, unwrap
 from opentelemetry.trace import SpanKind, Tracer, get_tracer
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,8 @@ def _with_tracer_wrapper(
             args: list[Any],
             kwargs: dict[str, Any],
         ) -> R:
+            if not is_instrumentation_enabled():
+                return wrapped(*args, **kwargs)
             return func(tracer, wrapped, instance, args, kwargs)
 
         return wrapper

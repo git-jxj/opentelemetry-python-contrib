@@ -9,6 +9,7 @@ from packaging import version
 
 from opentelemetry import trace as trace_api
 from opentelemetry.instrumentation.jinja2 import Jinja2Instrumentor
+from opentelemetry.instrumentation.utils import suppress_instrumentation
 from opentelemetry.test.test_base import TestBase
 from opentelemetry.trace import get_tracer
 
@@ -198,6 +199,34 @@ class TestJinja2Instrumentor(TestBase):
         self.assertEqual(len(spans), 0)
 
         Jinja2Instrumentor().instrument()
+
+    def test_suppress_instrumentation(self) -> None:
+        loader = jinja2.loaders.FileSystemLoader(TMPL_DIR)
+        env = jinja2.Environment(loader=loader, autoescape=True)
+
+        with suppress_instrumentation():
+            template = env.get_template("template.html")
+            self.assertEqual(template.render(name="Jinja"), "Message: Hello Jinja!")
+            self.assertEqual("".join(template.generate(name="Jinja")), "Message: Hello Jinja!")
+
+        self.assertEqual(self.memory_exporter.get_finished_spans(), ())
+
+        self.assertEqual(template.render(name="Jinja"), "Message: Hello Jinja!")
+        spans = self.memory_exporter.get_finished_spans()
+        self.assertEqual([span.name for span in spans], ["jinja2.load", "jinja2.render"])
+
+    def test_suppress_instrumentation_preserves_errors(self) -> None:
+        env = jinja2.Environment(undefined=jinja2.StrictUndefined, autoescape=True)
+        with suppress_instrumentation():
+            template = env.from_string("{{ missing }}")
+            with self.assertRaises(jinja2.UndefinedError):
+                template.render()
+            with self.assertRaises(jinja2.UndefinedError):
+                list(template.generate())
+            with self.assertRaises(jinja2.TemplateSyntaxError):
+                env.from_string("{% invalid %}")
+
+        self.assertEqual(self.memory_exporter.get_finished_spans(), ())
 
     def test_no_op_tracer_provider(self):
         self.memory_exporter.clear()
