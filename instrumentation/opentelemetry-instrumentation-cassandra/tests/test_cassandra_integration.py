@@ -245,6 +245,45 @@ class TestCassandraSemconvStability(TestBase):
     def _mocked_session(self):
         return cassandra.cluster.Session(cluster=mock.Mock(), hosts=[])
 
+    @mock.patch("cassandra.cluster.Session.__init__", return_value=None)
+    @mock.patch("cassandra.cluster.Session._create_response_future")
+    def test_keyword_query(self, mock_create_response_future: mock.Mock, mock_session_init: mock.Mock) -> None:
+        query = "SELECT * FROM test"
+        for mode in ("", "database", "database/dup"):
+            with self.subTest(mode=mode), mock.patch.dict("os.environ", {"OTEL_SEMCONV_STABILITY_OPT_IN": mode}):
+                _OpenTelemetrySemanticConventionStability._initialized = False
+                CassandraInstrumentor().instrument(include_db_statement=True)
+                try:
+                    session = self._mocked_session
+                    session.cluster = mock.Mock(contact_points=["localhost"])
+                    session.keyspace = "test"
+                    session._request_init_callbacks = []
+
+                    future = session.execute_async(query=query)
+
+                    self.assertIs(future, mock_create_response_future.return_value)
+                    spans = self.memory_exporter.get_finished_spans()
+                    self.assertEqual(len(spans), 1)
+                    attributes = spans[0].attributes
+                    if mode != "database":
+                        self.assertEqual(attributes[DB_STATEMENT], query)
+                    else:
+                        self.assertNotIn(DB_STATEMENT, attributes)
+                    if mode:
+                        self.assertEqual(attributes[DB_QUERY_TEXT], query)
+                    else:
+                        self.assertNotIn(DB_QUERY_TEXT, attributes)
+
+                    driver_error = cassandra.InvalidRequest("invalid query")
+                    mock_create_response_future.side_effect = driver_error
+                    with self.assertRaises(cassandra.InvalidRequest) as raised:
+                        session.execute_async(query=query)
+                    self.assertIs(raised.exception, driver_error)
+                finally:
+                    CassandraInstrumentor().uninstrument()
+                    self.memory_exporter.clear()
+                    mock_create_response_future.side_effect = None
+
     @mock.patch("cassandra.cluster.Cluster.connect")
     @mock.patch("cassandra.cluster.Session.__init__")
     @mock.patch("cassandra.cluster.Session._create_response_future")

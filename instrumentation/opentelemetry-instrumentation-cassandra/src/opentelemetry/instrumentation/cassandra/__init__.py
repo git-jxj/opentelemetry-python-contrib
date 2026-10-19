@@ -96,7 +96,7 @@ def _instrument(tracer_provider, include_db_statement=False, sem_conv_opt_in_mod
                     sem_conv_opt_in_mode,
                 )
                 if include_db_statement:
-                    query = args[0]
+                    query = args[0] if args else kwargs.get("query")
                     _set_db_statement(attrs, str(query), sem_conv_opt_in_mode)
                 span.set_attributes(attrs)
             response = func(*args, **kwargs)
